@@ -1,0 +1,34 @@
+{
+    "manifest_version": 3,
+    "name": "SlackEEE",
+    "version": "1.0",
+    "description": "Slack End-to-End Encryption",
+    "permissions": ["storage"],
+    "action": {
+      "default_popup": "popup.html",
+      "default_icon": {
+        "16": "images/icon-16.png",
+        "48": "images/icon-48.png",
+        "128": "images/icon-128.png"
+      }
+    },
+    "background": {
+      "scripts": ["background.js"]
+    },
+    "content_scripts": [
+      {
+        "matches": ["https://*.slack.com/*"],
+        "js": ["main.js"]
+      }
+    ],
+    "icons": {
+      "16": "images/icon-16.png",
+      "48": "images/icon-48.png",
+      "128": "images/icon-128.png"
+    },
+    "browser_specific_settings": {
+      "gecko": {
+        "id": "tobias@actuallava.com"
+      }
+    }
+  }

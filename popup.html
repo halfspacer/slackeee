@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slack-Encrypt</title>
+  <link
+    href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+</head>
+<body>
+  <div class="container mt-4 pb-4">
+    <h5 class="card-title text-center mb-4">Slack-Encrypt</h5>
+    <div id="success-message" class="text-center text-success mb-4" style="display: none;">
+      Encryption key saved successfully.
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div class="form-group">
+          <label for="encryptionKey">Key:</label>
+          <input type="text" class="form-control" id="encryption-key" placeholder="Enter your key">
+        </div>
+        <button id="save-key" class="btn btn-primary">Save Key</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
