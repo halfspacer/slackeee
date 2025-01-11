@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "SlackEEE",
+    "name": "Slackeee",
     "version": "1.0",
     "description": "Slack End-to-End Encryption",
     "permissions": ["storage"],
