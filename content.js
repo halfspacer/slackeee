@@ -24,6 +24,10 @@ let sendButtons = [];
 let messageElementCollection = [];
 let firstRun = true;
 
+if (typeof browser === "undefined") {
+  var browser = chrome;
+}
+
 /**
  * Encrypt a message using AES-GCM.
  * @param {string} message - The message to encrypt.

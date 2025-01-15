@@ -1,10 +1,10 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Slackeee",
-  "version": "1.23",
+  "version": "1.24",
   "description": "Slack End-to-End Encryption",
-  "permissions": ["storage"],
-  "browser_action": {
+  "permissions": ["storage", "tabs"],
+  "action": {
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
@@ -16,6 +16,12 @@
     {
       "matches": ["https://*.slack.com/*"],
       "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["styles.css"],
+      "matches": ["<all_urls>"]
     }
   ],
   "icons": {
