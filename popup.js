@@ -1,6 +1,10 @@
 const encryptionKeyInput = document.getElementById("encryption-key");
 const successMessage = document.getElementById("success-message");
 
+if (typeof browser === "undefined") {
+  var browser = chrome;
+}
+
 function saveEncryptionKey() {
   const encryptionKey = encryptionKeyInput.value.trim();
   if (encryptionKey) {
@@ -8,6 +12,11 @@ function saveEncryptionKey() {
       .then((response) => {
         if (response.success) {
           successMessage.style.display = "block";
+          browser.tabs.query({ url: "*://*.slack.com/*" }).then((tabs) => {
+            tabs.forEach((tab) => {
+              browser.tabs.reload(tab.id);
+            });
+          });
         }
       })
       .catch((error) => {
@@ -29,13 +38,15 @@ function loadEncryptionKey() {
 }
 
 function setKey(key) {
-  return browser.storage.sync.set({ slackeeeKey: key })
+  return browser.storage.sync
+    .set({ slackeeeKey: key })
     .then(() => ({ success: true }))
     .catch((error) => ({ success: false, error: error.message }));
 }
 
 function getKey() {
-  return browser.storage.sync.get("slackeeeKey")
+  return browser.storage.sync
+    .get("slackeeeKey")
     .then(({ slackeeeKey }) => {
       if (slackeeeKey) {
         return { success: true, key: slackeeeKey };
