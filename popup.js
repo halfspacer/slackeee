@@ -4,8 +4,7 @@ const successMessage = document.getElementById("success-message");
 function saveEncryptionKey() {
   const encryptionKey = encryptionKeyInput.value.trim();
   if (encryptionKey) {
-    browser.runtime
-      .sendMessage({ type: "SET_KEY", key: encryptionKey })
+    setKey(encryptionKey)
       .then((response) => {
         if (response.success) {
           successMessage.style.display = "block";
@@ -18,20 +17,33 @@ function saveEncryptionKey() {
 }
 
 function loadEncryptionKey() {
-  browser.runtime
-    .sendMessage({ type: "GET_KEY" })
+  getKey()
     .then((response) => {
-      try {
-        if (response.success) {
-          encryptionKeyInput.value = response.key || "";
-        }
-      } catch (error) {
-        console.error("Error loading encryption key:", error);
+      if (response.success) {
+        encryptionKeyInput.value = response.key || "";
       }
     })
     .catch((error) => {
       console.error("Error:", error);
     });
+}
+
+function setKey(key) {
+  return browser.storage.sync.set({ slackeeeKey: key })
+    .then(() => ({ success: true }))
+    .catch((error) => ({ success: false, error: error.message }));
+}
+
+function getKey() {
+  return browser.storage.sync.get("slackeeeKey")
+    .then(({ slackeeeKey }) => {
+      if (slackeeeKey) {
+        return { success: true, key: slackeeeKey };
+      } else {
+        return { success: false, error: "No encryption key found." };
+      }
+    })
+    .catch((error) => ({ success: false, error: error.message }));
 }
 
 function initializeEventListeners() {

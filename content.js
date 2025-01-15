@@ -14,7 +14,7 @@ const CHANNEL_CHANGE_SELECTOR =
   'div[data-qa="slack_kit_list"].c-virtual_list__scroll_container';
 
 const textDecoder = new TextDecoder();
-const textEncoder = new TextEncoder();
+const textEncoder = new TextEncoder("utf-8");
 
 // Cached DOM elements
 let encryptedSendButtons = [];
@@ -178,17 +178,20 @@ function observeThreadOpen() {
       if (mutation.type === "childList") {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === 1) {
-            // Ensure it's an element node
-            // Detect the threads flexpane using data-qa attribute
-            if (node.matches && node.matches('[data-qa="threads_flexpane"]')) {
-              Initialize(KEY);
+            if (node.matches && /p-threads_flexpane/.test(node.className)) {
+              observeSendButton(node);
             } else {
-              // Check within the subtree of the added node
               const threadNode = node.querySelector(
-                '[data-qa="threads_flexpane"]'
+                '[class*="p-threads_flexpane"]'
               );
               if (threadNode) {
-                Initialize(KEY);
+                observeSendButton(threadNode);
+                const sendButton = threadNode.querySelector(SEND_BUTTON_CONTAINER_ID);
+                const inputField = threadNode.querySelector(INPUT_CONTAINER_ID);
+                if (sendButton && inputField) {
+                  Initialize(KEY);
+                  threadSendButtonObserver.disconnect();
+                }
               }
             }
           }
@@ -204,6 +207,24 @@ function observeThreadOpen() {
   threadObserver.observe(targetNode, config);
 }
 
+let threadSendButtonObserver;
+function observeSendButton(threadNode) {
+  threadSendButtonObserver = new MutationObserver((mutationsList, observer) => {
+    for (let mutation of mutationsList) {
+      if (mutation.type === "childList") {
+        const sendButton = threadNode.querySelector(SEND_BUTTON_CONTAINER_ID);
+        const inputField = threadNode.querySelector(INPUT_CONTAINER_ID);
+        if (sendButton && inputField) {
+          Initialize(KEY);
+          threadSendButtonObserver.disconnect();
+        }
+      }
+    }
+  });
+
+  threadSendButtonObserver.observe(threadNode, { childList: true, subtree: true });
+}
+
 function removeExistingSendButtons() {
   const existingSendButtons = document.querySelectorAll(
     `.${ENCRYPTED_SEND_BUTTON_CLASS}`
@@ -211,6 +232,10 @@ function removeExistingSendButtons() {
   existingSendButtons.forEach((button) => {
     button.remove();
   });
+
+  for (const observer of sendButtonClickedObservers) {
+    observer.disconnect();
+  }
 }
 
 let hasAddedCSS = false;
@@ -264,13 +289,17 @@ function createSendButton(sendButtonContainer) {
  * When the mouse enters the element with the specified tooltip parent ID,
  * There is probably a better way to properly trigger the native Slack tooltip, but I couldn't really figure it out.
  *
- * @param {HTMLElement} clonedSendButtonContainer - The container element that contains the cloned send button.
+ * @param {HTMLElement} encrypedSendButton - The container element that contains the cloned send button.
  */
-function initializeTooltip(clonedSendButtonContainer) {
+let tooltips = [];
+function initializeTooltip(encrypedSendButton) {
+  removeAllTooltips();
   const tooltipParentId = '[data-sk="tooltip_parent"]';
-  let tooltipParent = clonedSendButtonContainer.querySelector(tooltipParentId);
+  let tooltipParent = encrypedSendButton.querySelector(tooltipParentId);
   if (tooltipParent) {
     tooltipParent.addEventListener("mouseenter", () => {
+      removeAllTooltips();
+
       const tooltip = document.createElement("div");
       tooltip.className =
         "ReactModal__Content ReactModal__Content--after-open popover c-popover__content";
@@ -293,11 +322,20 @@ function initializeTooltip(clonedSendButtonContainer) {
       tooltipParent.addEventListener(
         "mouseleave",
         () => {
-          tooltip.remove();
+          removeAllTooltips();
         },
         { once: true }
       );
+
+      tooltips.push(tooltip);
     });
+  }
+
+  function removeAllTooltips() {
+    tooltips.forEach((tooltip) => {
+      tooltip.remove();
+    });
+    tooltips = [];
   }
 }
 
@@ -333,7 +371,7 @@ function addInputEventListener(messageInput, clonedSendButtonContainer) {
  * Adds a click event listener to the cloned send button container that encrypts the message input
  * before sending it.
  */
-let sendButtonClickedObserver;
+let sendButtonClickedObservers = [];
 function addSendButtonClickListener(
   encryptedSendButton,
   messageInput,
@@ -342,8 +380,8 @@ function addSendButtonClickListener(
 ) {
   encryptedSendButton.addEventListener("click", async () => {
     const messageText = messageInput.textContent;
-    const response = await browser.runtime.sendMessage({ type: "GET_KEY" });
-    const encryptionKey = response ? response.key : null;
+    const { success, key } = await getKey();
+    const encryptionKey = success ? key : null;
 
     if (!messageText || !encryptionKey) {
       return;
@@ -365,17 +403,14 @@ function addSendButtonClickListener(
       messageInput.textContent = finalMessage;
       messageInput.dispatchEvent(new Event("input", { bubbles: true }));
 
-      if (sendButtonClickedObserver) {
-        sendButtonClickedObserver.disconnect();
-      }
-      sendButtonClickedObserver = new MutationObserver((mutations) => {
+      const sendButtonClickedObserver = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
           if (
             mutation.type === "childList" ||
             mutation.type === "characterData"
           ) {
             const originalSendButton =
-              sendButtonContainer.querySelector("button");
+            sendButtonContainer.querySelector("button");
             if (originalSendButton) {
               originalSendButton.click();
 
@@ -389,11 +424,13 @@ function addSendButtonClickListener(
         });
       });
 
-      observer.observe(messageInput, {
+      sendButtonClickedObserver.observe(messageInput, {
         childList: true,
         characterData: true,
         subtree: true,
       });
+
+      sendButtonClickedObservers.push(sendButtonClickedObserver);
     } catch (error) {
       console.error("Failed to encrypt and send the message:", error);
     }
@@ -434,8 +471,7 @@ async function decryptMessage(encryptedMessage, iv, key) {
 
     return decodedMessage;
   } catch (error) {
-    console.error("Decryption failed:", error);
-    throw error;
+    return encryptedMessage;
   }
 }
 
@@ -487,8 +523,8 @@ async function decryptAllMessages() {
             .map((char) => char.charCodeAt(0))
         );
 
-        const response = await browser.runtime.sendMessage({ type: "GET_KEY" });
-        const encryptionKey = response.key;
+        const { success, key } = await getKey();
+        const encryptionKey = success ? key : null;
 
         if (!encryptionKey) {
           return;
@@ -666,4 +702,22 @@ function getAllMessageContainers() {
   // Select all elements that have a class starting with 'partial'
   const cont = document.querySelectorAll(`[class*="${MESSAGE_CONTAINER}"]`);
   return cont;
+}
+
+function setKey(key) {
+  return browser.storage.sync.set({ slackeeeKey: key })
+    .then(() => ({ success: true }))
+    .catch((error) => ({ success: false, error: error.message }));
+}
+
+function getKey() {
+  return browser.storage.sync.get("slackeeeKey")
+    .then(({ slackeeeKey }) => {
+      if (slackeeeKey) {
+        return { success: true, key: slackeeeKey };
+      } else {
+        return { success: false, error: "No encryption key found." };
+      }
+    })
+    .catch((error) => ({ success: false, error: error.message }));
 }
