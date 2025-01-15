@@ -30,18 +30,13 @@ let firstRun = true;
  * @param {string} key - The encryption key.
  * @returns {Promise<{encryptedMessage: Uint8Array, iv: Uint8Array}>} - The encrypted message and Initialization Vector (IV).
  */
-async function encryptMessage(message, key) {
+async function encryptMessage(messageInput, key) {
   try {
-    // Generate a random Initialization Vector (IV)
+    const messageWithEmojisEncoded = extractEmojiCodes(messageInput);
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-
-    // Encode the message to a Uint8Array
-    const encodedMessage = textEncoder.encode(message);
-
-    // Hash the key using SHA-256
+    const encodedMessage = textEncoder.encode(messageWithEmojisEncoded);
     const hashedKey = await hashKey(key);
 
-    // Import the hashed key for AES-GCM encryption
     const cryptoKey = await window.crypto.subtle.importKey(
       "raw",
       hashedKey,
@@ -50,14 +45,12 @@ async function encryptMessage(message, key) {
       ["encrypt"]
     );
 
-    // Encrypt the message
     const encryptedMessage = await window.crypto.subtle.encrypt(
       { name: "AES-GCM", iv: iv },
       cryptoKey,
       encodedMessage
     );
 
-    // Return the encrypted message and IV
     return { encryptedMessage: new Uint8Array(encryptedMessage), iv: iv };
   } catch (error) {
     console.error("Encryption failed:", error);
@@ -67,13 +60,56 @@ async function encryptMessage(message, key) {
 
 /**
  * Hash a key using SHA-256.
- * @param {string} key - The key to hash. This should be a string that will be converted to a Uint8Array and hashed using SHA-256.
+ * @param {string} key - The key to hash.
  * @returns {Promise<Uint8Array>} - The hashed key.
  */
 async function hashKey(key) {
   const encodedKey = textEncoder.encode(key);
   const hash = await crypto.subtle.digest("SHA-256", encodedKey);
   return new Uint8Array(hash);
+}
+
+/**
+ * Replaces emoji images with their corresponding encoded IDs in the input field.
+ * @param {HTMLElement} messageInput - The message input field element.
+ * @returns {string} - The processed message text with encoded emoji IDs.
+ */
+function extractEmojiCodes(messageInput) {
+  const tempDiv = document.createElement("div");
+  tempDiv.innerHTML = messageInput.innerHTML;
+  const emojis = tempDiv.querySelectorAll("img.emoji");
+
+  emojis.forEach((emoji) => {
+    const backgroundImage = emoji.style.backgroundImage;
+    const match = backgroundImage.match(/\/([0-9a-f]{4,})\.png/);
+    const emojiId = match ? match[1] : "unknown";
+    const emojiCode = `:emoji_${emojiId}:`;
+    const textNode = document.createTextNode(emojiCode);
+    emoji.parentNode.replaceChild(textNode, emoji);
+  });
+
+  return tempDiv.textContent || tempDiv.innerText || "";
+}
+
+/**
+ * Converts encoded emoji IDs back to emoji images in the decrypted message.
+ * @param {string} decryptedText - The decrypted message text with encoded emoji IDs.
+ * @returns {string} - The final HTML string with emoji images.
+ */
+function convertEmojiCodes(decryptedText) {
+  if (typeof decryptedText !== "string") {
+    console.error("decryptMessage returned non-string:", decryptedText);
+    return ""; // Fallback to empty string or handle accordingly
+  }
+
+  const emojiRegex = /:emoji_([0-9a-f]{4,}):/g;
+  return decryptedText.replace(emojiRegex, (match, emojiId) => {
+    return `
+      <span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji" delay="300" data-sk="tooltip_parent">
+        <img src="https://a.slack-edge.com/production-standard-emoji-assets/14.0/google-medium/${emojiId}.png" aria-label="emoji" alt="${match}" data-stringify-type="emoji" data-stringify-emoji="${match}">
+      </span>
+    `;
+  });
 }
 
 /**
@@ -167,6 +203,7 @@ function observeChannelChange() {
 
 /**
  * Observe when a Slack thread is opened by detecting the addition of the threads flexpane.
+ * ( Is there a better way to do this? )
  */
 let threadObserver;
 function observeThreadOpen() {
@@ -178,21 +215,11 @@ function observeThreadOpen() {
       if (mutation.type === "childList") {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === 1) {
-            if (node.matches && /p-threads_flexpane/.test(node.className)) {
-              observeSendButton(node);
-            } else {
-              const threadNode = node.querySelector(
-                '[class*="p-threads_flexpane"]'
-              );
-              if (threadNode) {
-                observeSendButton(threadNode);
-                const sendButton = threadNode.querySelector(SEND_BUTTON_CONTAINER_ID);
-                const inputField = threadNode.querySelector(INPUT_CONTAINER_ID);
-                if (sendButton && inputField) {
-                  Initialize(KEY);
-                  threadSendButtonObserver.disconnect();
-                }
-              }
+            const threadNode = node.querySelector(
+              '[class*="p-threads_flexpane"]'
+            );
+            if (threadNode) {
+              Initialize(KEY);
             }
           }
         });
@@ -205,24 +232,6 @@ function observeThreadOpen() {
   }
   threadObserver = new MutationObserver(callback);
   threadObserver.observe(targetNode, config);
-}
-
-let threadSendButtonObserver;
-function observeSendButton(threadNode) {
-  threadSendButtonObserver = new MutationObserver((mutationsList, observer) => {
-    for (let mutation of mutationsList) {
-      if (mutation.type === "childList") {
-        const sendButton = threadNode.querySelector(SEND_BUTTON_CONTAINER_ID);
-        const inputField = threadNode.querySelector(INPUT_CONTAINER_ID);
-        if (sendButton && inputField) {
-          Initialize(KEY);
-          threadSendButtonObserver.disconnect();
-        }
-      }
-    }
-  });
-
-  threadSendButtonObserver.observe(threadNode, { childList: true, subtree: true });
 }
 
 function removeExistingSendButtons() {
@@ -246,7 +255,7 @@ function addCSSStyles() {
   hasAddedCSS = true;
   const link = document.createElement("link");
   link.rel = "stylesheet";
-  link.href = browser.extension.getURL("styles.css");
+  link.href = browser.runtime.getURL("styles.css");
   document.head.appendChild(link);
 }
 
@@ -389,7 +398,7 @@ function addSendButtonClickListener(
 
     try {
       const { encryptedMessage, iv } = await encryptMessage(
-        messageText,
+        messageInput,
         encryptionKey
       );
 
@@ -410,7 +419,7 @@ function addSendButtonClickListener(
             mutation.type === "characterData"
           ) {
             const originalSendButton =
-            sendButtonContainer.querySelector("button");
+              sendButtonContainer.querySelector("button");
             if (originalSendButton) {
               originalSendButton.click();
 
@@ -446,33 +455,28 @@ function addSendButtonClickListener(
  * @throws {Error} - If the decryption fails.
  */
 async function decryptMessage(encryptedMessage, iv, key) {
-  try {
-    // Hash the key using SHA-256
-    const hashedKey = await hashKey(key);
+  // Hash the key using SHA-256
+  const hashedKey = await hashKey(key);
 
-    // Import the hashed key for AES-GCM decryption
-    const cryptoKey = await window.crypto.subtle.importKey(
-      "raw",
-      hashedKey,
-      { name: "AES-GCM" },
-      false,
-      ["decrypt"]
-    );
+  // Import the hashed key for AES-GCM decryption
+  const cryptoKey = await window.crypto.subtle.importKey(
+    "raw",
+    hashedKey,
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"]
+  );
 
-    // Decrypt the message
-    const decryptedMessage = await window.crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: iv },
-      cryptoKey,
-      encryptedMessage
-    );
+  // Decrypt the message
+  const decryptedMessage = await window.crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: iv },
+    cryptoKey,
+    encryptedMessage
+  );
 
-    // Decode the decrypted message to a string
-    const decodedMessage = textDecoder.decode(decryptedMessage);
-
-    return decodedMessage;
-  } catch (error) {
-    return encryptedMessage;
-  }
+  const decodedMessage = textDecoder.decode(decryptedMessage);
+  const messageHtmlWithEmojis = convertEmojiCodes(decodedMessage);
+  return messageHtmlWithEmojis;
 }
 
 /**
@@ -531,18 +535,20 @@ async function decryptAllMessages() {
         }
 
         // Decrypt the message
-        try {
-          const decryptedMessage = await decryptMessage(
-            encryptedMessage,
-            iv,
-            encryptionKey
-          );
+        decryptedMessage = await decryptMessage(
+          encryptedMessage,
+          iv,
+          encryptionKey
+        );
+        createMessageEntry(decryptedMessage);
+      }
 
-          const lockIcon = document.createElement("svg");
-          lockIcon.setAttribute("aria-hidden", "true");
-          lockIcon.setAttribute("viewBox", "0 0 20 20");
-          lockIcon.classList.add("lock-icon");
-          lockIcon.innerHTML = `
+      function createMessageEntry(msg) {
+        const lockIcon = document.createElement("svg");
+        lockIcon.setAttribute("aria-hidden", "true");
+        lockIcon.setAttribute("viewBox", "0 0 20 20");
+        lockIcon.classList.add("lock-icon");
+        lockIcon.innerHTML = `
         <span class="c-icon c-icon--lock" data-qa="lock-icon" style="margin-right: 5px;">
           <svg aria-hidden="true" viewBox="0 0 20 20">
             <path fill="currentColor" d="M10 2a4 4 0 0 0-4 4v4H5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7a1 1 0 0 0-1-1h-1V6a4 4 0 0 0-4-4zm-2 4a2 2 0 1 1 4 0v4H8V6zm-1 6h6v5H7v-5z"></path>
@@ -550,21 +556,20 @@ async function decryptAllMessages() {
         </span>
         `;
 
-          const container = document.createElement("div");
-          container.classList.add("message-container");
-          container.style.display = "flex";
-          container.style.alignItems = "center";
+        const container = document.createElement("div");
+        container.classList.add("message-container");
+        container.style.display = "flex";
+        container.style.alignItems = "center";
 
-          // Append the lock icon and the message to the container
-          container.appendChild(lockIcon);
-          const messageText = document.createElement("span");
-          messageText.textContent = decryptedMessage;
-          container.appendChild(messageText);
+        // Append the lock icon and the message to the container
+        container.appendChild(lockIcon);
+        const messageText = document.createElement("span");
+        messageText.innerHTML = msg;
+        container.appendChild(messageText);
 
-          // Append the container to the message element
-          messageElement.innerHTML = "";
-          messageElement.appendChild(container);
-        } catch (error) {}
+        // Append the container to the message element
+        messageElement.innerHTML = "";
+        messageElement.appendChild(container);
       }
     }
   }
@@ -705,13 +710,15 @@ function getAllMessageContainers() {
 }
 
 function setKey(key) {
-  return browser.storage.sync.set({ slackeeeKey: key })
+  return browser.storage.sync
+    .set({ slackeeeKey: key })
     .then(() => ({ success: true }))
     .catch((error) => ({ success: false, error: error.message }));
 }
 
 function getKey() {
-  return browser.storage.sync.get("slackeeeKey")
+  return browser.storage.sync
+    .get("slackeeeKey")
     .then(({ slackeeeKey }) => {
       if (slackeeeKey) {
         return { success: true, key: slackeeeKey };
