@@ -1,33 +1,37 @@
-const ENCRYPTION_KEY_STORAGE_KEY = "slackeee-key";
+const encryptionKeyInput = document.getElementById("encryption-key");
+const successMessage = document.getElementById("success-message");
 
-// Saves the encryption key entered by the user to the browser's storage.
 function saveEncryptionKey() {
-  const encryptionKeyInput = document.getElementById("encryption-key");
-  const encryptionKey = encryptionKeyInput.value;
+  const encryptionKey = encryptionKeyInput.value.trim();
   if (encryptionKey) {
-    browser.storage.sync
-      .set({ [ENCRYPTION_KEY_STORAGE_KEY]: encryptionKey })
-      .then(() => {
-        document.getElementById("success-message").style.display = "block";
-        setTimeout(() => {
-          document.getElementById("success-message").style.display = "none";
-        }, 3000);
+    browser.runtime
+      .sendMessage({ type: "SET_KEY", key: encryptionKey })
+      .then((response) => {
+        if (response.success) {
+          successMessage.style.display = "block";
+        }
+      })
+      .catch((error) => {
+        console.error("Error:", error);
       });
-  } else {
-    alert("Please enter a valid encryption key.");
   }
 }
 
-// Loads the encryption key from the browser's synchronized storage and sets it
 function loadEncryptionKey() {
-  browser.storage.sync.get(ENCRYPTION_KEY_STORAGE_KEY).then((result) => {
-    const encryptionKey = result[ENCRYPTION_KEY_STORAGE_KEY] || "";
-    try {
-      document.getElementById("encryption-key").value = encryptionKey;
-    } catch (error) {
-      console.log("Error loading encryption key:", error);
-    }
-  });
+  browser.runtime
+    .sendMessage({ type: "GET_KEY" })
+    .then((response) => {
+      try {
+        if (response.success) {
+          encryptionKeyInput.value = response.key || "";
+        }
+      } catch (error) {
+        console.error("Error loading encryption key:", error);
+      }
+    })
+    .catch((error) => {
+      console.error("Error:", error);
+    });
 }
 
 function initializeEventListeners() {

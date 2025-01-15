@@ -1,0 +1,25 @@
+
+.c-wysiwyg_container__button--send-encrypted {
+    background-color:rgb(175, 76, 76); /* Red background */
+    color: white; /* White text */
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: 4px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted .send-icon {
+    margin-right: 5px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted .lock-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted:hover {
+    background-color:rgb(209, 63, 63); /* Darker red on hover */
+  }
