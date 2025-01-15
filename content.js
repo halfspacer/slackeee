@@ -56,10 +56,7 @@ async function encryptMessage(messageInput, key) {
     );
 
     return { encryptedMessage: new Uint8Array(encryptedMessage), iv: iv };
-  } catch (error) {
-    console.error("Encryption failed:", error);
-    throw error;
-  }
+  } catch (error) {}
 }
 
 /**
@@ -102,8 +99,7 @@ function extractEmojiCodes(messageInput) {
  */
 function convertEmojiCodes(decryptedText) {
   if (typeof decryptedText !== "string") {
-    console.error("decryptMessage returned non-string:", decryptedText);
-    return ""; // Fallback to empty string or handle accordingly
+    return "";
   }
 
   const emojiRegex = /:emoji_([0-9a-f]{4,}):/g;
@@ -410,8 +406,13 @@ function addSendButtonClickListener(
         String.fromCharCode.apply(null, encryptedMessage)
       );
       const ivBase64 = btoa(String.fromCharCode.apply(null, iv));
-      const invisibleChar = "¤";
-      const finalMessage = `${encryptedMessageBase64}:${ivBase64}${invisibleChar}`;
+
+      // Prepend a random letter to the message (To ensure we don't start with a /, since Slack will interpret it as a command)
+      const randomLetter = String.fromCharCode(
+        65 + Math.floor(Math.random() * 26)
+      );
+
+      const finalMessage = `${randomLetter}${encryptedMessageBase64}:${ivBase64}${ENCRYPTION_DELIMITER}`;
 
       messageInput.textContent = finalMessage;
       messageInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -429,8 +430,6 @@ function addSendButtonClickListener(
 
               // Trigger the "keyup" event to update the send button color
               messageInput.dispatchEvent(new KeyboardEvent("keyup"));
-            } else {
-              console.error("Send button not found.");
             }
             observer.disconnect();
           }
@@ -444,9 +443,7 @@ function addSendButtonClickListener(
       });
 
       sendButtonClickedObservers.push(sendButtonClickedObserver);
-    } catch (error) {
-      console.error("Failed to encrypt and send the message:", error);
-    }
+    } catch (error) {}
   });
 }
 
@@ -497,7 +494,6 @@ async function decryptMessage(encryptedMessage, iv, key) {
 async function decryptAllMessages() {
   // Get all message elements
   if (!messageContainers) {
-    console.error("Message container not found.");
     return;
   }
 
@@ -517,34 +513,39 @@ async function decryptAllMessages() {
 
       // Check if the message ends with the special character
       if (messageText.endsWith(ENCRYPTION_DELIMITER)) {
-        const [encryptedMessageBase64, ivBase64] = messageText
-          .split(ENCRYPTION_DELIMITER)[0]
-          .split(":");
-        const encryptedMessage = new Uint8Array(
-          atob(encryptedMessageBase64)
-            .split("")
-            .map((char) => char.charCodeAt(0))
-        );
-        const iv = new Uint8Array(
-          atob(ivBase64)
-            .split("")
-            .map((char) => char.charCodeAt(0))
-        );
+        try {
+          // Remove the first character from the message since it was prepended before encryption
+          const encryptedMessageText = messageText.slice(1);
 
-        const { success, key } = await getKey();
-        const encryptionKey = success ? key : null;
+          const [encryptedMessageBase64, ivBase64] = encryptedMessageText
+            .split(ENCRYPTION_DELIMITER)[0]
+            .split(":");
+          const encryptedMessage = new Uint8Array(
+            atob(encryptedMessageBase64)
+              .split("")
+              .map((char) => char.charCodeAt(0))
+          );
+          const iv = new Uint8Array(
+            atob(ivBase64)
+              .split("")
+              .map((char) => char.charCodeAt(0))
+          );
 
-        if (!encryptionKey) {
-          return;
-        }
+          const { success, key } = await getKey();
+          const encryptionKey = success ? key : null;
 
-        // Decrypt the message
-        decryptedMessage = await decryptMessage(
-          encryptedMessage,
-          iv,
-          encryptionKey
-        );
-        createMessageEntry(decryptedMessage);
+          if (!encryptionKey) {
+            return;
+          }
+
+          // Decrypt the message
+          decryptedMessage = await decryptMessage(
+            encryptedMessage,
+            iv,
+            encryptionKey
+          );
+          createMessageEntry(decryptedMessage);
+        } catch (error) {}
       }
 
       function createMessageEntry(msg) {
