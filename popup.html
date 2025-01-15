@@ -8,10 +8,20 @@
     href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
     rel="stylesheet"
   />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css"
+    rel="stylesheet"
+  />
 </head>
 <body>
-  <div class="container mt-4 pb-4" style="width: 300px;">
-    <h5 class="card-title text-center mb-4">Slackeee</h5>
+  <div class="container mt-4 pb-4" style="width: 400px;">
+    <h5 class="card-title text-left mb-4 d-flex align-items-center">
+      <img src="icons/icon-48.png" alt="Icon" class="mr-2" />
+      <div class="d-flex flex-column">
+        Slackeee
+        <small class="text-muted">by Halfspacer</small>
+      </div>
+    </h5>
     <div id="success-message" class="text-center text-success mb-4" style="display: none;">
       Encryption key saved successfully.
     </div>
@@ -19,15 +29,28 @@
       <div class="card-body">
         <div class="form-group">
           <label for="encryptionKey">Key:</label>
-          <input type="text" class="form-control" id="encryption-key" placeholder="Enter your key">
+          <div class="input-group">
+            <input type="text" class="form-control" id="encryption-key" placeholder="Enter your key">
+            <div class="input-group-append ml-2">
+              <button id="generate-key" class="btn btn-secondary mr-2" data-toggle="tooltip" data-placement="top" title="Generate Secure Key">
+                <i class="bi bi-arrow-repeat"></i>
+              </button>
+              <button id="copy-key" class="btn btn-secondary" data-toggle="tooltip" data-placement="top" title="Copy Key" style="display: none;">
+                <i class="bi bi-clipboard"></i>
+              </button>
+            </div>
+          </div>
         </div>
-        <button id="save-key" class="btn btn-primary">Save Key</button>
+        <div class="d-flex justify-content-between mt-3">
+          <button id="save-key" class="btn btn-primary">Save Key</button>
+        </div>
+        <hr />
+        <div class="text-center mt-4" style="width: 100%;">
+          <a href="https://www.buymeacoffee.com/halfspacer" target="_blank" class="btn btn-success" style="width: 100%;">
+            ☕ Buy Me A Coffee
+          </a>
+        </div>
       </div>
-    </div>
-    <div class="text-center mt-4" style="width: 100%;">
-      <a href="https://www.buymeacoffee.com/halfspacer" target="_blank" class="btn btn-success" style="width: 100%;">
-        ☕ Buy Me A Coffee
-      </a>
     </div>
   </div>
   <script src="popup.js"></script>
