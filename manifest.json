@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Slackeee",
-  "version": "1.24",
+  "version": "1.31",
   "description": "Slack End-to-End Encryption",
   "permissions": ["storage", "tabs"],
   "action": {
@@ -18,6 +18,9 @@
       "js": ["content.js"]
     }
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "web_accessible_resources": [
     {
       "resources": ["styles.css"],

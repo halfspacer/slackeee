@@ -1,61 +1,74 @@
 const encryptionKeyInput = document.getElementById("encryption-key");
 const successMessage = document.getElementById("success-message");
+const saveKeyButton = document.getElementById("save-key");
+const generateKeyButton = document.getElementById("generate-key");
+const copyButton = document.getElementById("copy-key");
 
 if (typeof browser === "undefined") {
   var browser = chrome;
 }
 
-function saveEncryptionKey() {
-  const encryptionKey = encryptionKeyInput.value.trim();
-  if (encryptionKey) {
-    setKey(encryptionKey)
-      .then((response) => {
-        if (response.success) {
-          successMessage.style.display = "block";
-          browser.tabs.query({ url: "*://*.slack.com/*" }).then((tabs) => {
-            tabs.forEach((tab) => {
-              browser.tabs.reload(tab.id);
-            });
-          });
-        }
-      })
-      .catch((error) => {
-        console.error("Error:", error);
-      });
-  }
+function parseConversationId(url) {
+  // Example Slack URL: https://app.slack.com/client/TEAM_ID/CHANNEL_ID
+  const parts = url.split("/");
+  return parts[parts.length - 1] || null;
 }
 
 function loadEncryptionKey() {
-  getKey()
-    .then((response) => {
-      if (response.success) {
-        encryptionKeyInput.value = response.key || "";
-        toggleCopyButton();
+  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (tabs && tabs.length) {
+      const conversationId = parseConversationId(tabs[0].url);
+
+      // If title doesn't contain (DM) or (Channel), return
+      const pageTitle = tabs[0].title;
+      if (!pageTitle.includes("(DM)") && !pageTitle.includes("(Channel)")) {
+        return;
       }
-    })
-    .catch((error) => {
-      console.error("Error:", error);
+
+      if (conversationId) {
+        getEncryptionKeyForConversationIfAvailable(conversationId).then((key) => {
+          if (key) {
+            encryptionKeyInput.value = key;
+            toggleCopyButton();
+
+            // The name of the person or channel is the first part of the title (before the (DM) part)
+            const titleParts = pageTitle.split(" (DM)");
+            const conversationName = titleParts[0];
+            // Set the encryption-key-label to the conversation name
+            document.getElementById("encryption-key-label").innerHTML = `Secure conversation with <b>${conversationName}</b>`;
+          }
+        });
+      }
+    }
+  });
+}
+
+function saveEncryptionKeyForConversation() {
+  const encryptionKey = encryptionKeyInput.value.trim();
+  if (!encryptionKey) return;
+
+  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (!tabs || !tabs.length) return;
+    const conversationId = parseConversationId(tabs[0].url);
+    if (!conversationId) return;
+
+    // Retrieve existing conversation-based keys
+    browser.storage.sync.get("slackeeeConversationKeys").then((result) => {
+      const conversationKeys = result.slackeeeConversationKeys || {};
+      conversationKeys[conversationId] = encryptionKey;
+      // Store updated conversation keys
+      browser.storage.sync.set({ slackeeeConversationKeys: conversationKeys }).then(() => {
+        successMessage.style.display = "block";
+      });
     });
+  });
 }
 
-function setKey(key) {
-  return browser.storage.sync
-    .set({ slackeeeKey: key })
-    .then(() => ({ success: true }))
-    .catch((error) => ({ success: false, error: error.message }));
-}
-
-function getKey() {
-  return browser.storage.sync
-    .get("slackeeeKey")
-    .then(({ slackeeeKey }) => {
-      if (slackeeeKey) {
-        return { success: true, key: slackeeeKey };
-      } else {
-        return { success: false, error: "No encryption key found." };
-      }
-    })
-    .catch((error) => ({ success: false, error: error.message }));
+function getEncryptionKeyForConversationIfAvailable(conversationId) {
+  return browser.storage.sync.get("slackeeeConversationKeys").then((result) => {
+    const conversationKeys = result.slackeeeConversationKeys || {};
+    return conversationKeys[conversationId] || null;
+  });
 }
 
 /**
@@ -81,8 +94,6 @@ function generateKey() {
   toggleCopyButton();
 }
 
-const copyButton = document.getElementById("copy-key");
-
 function copyKeyToClipboard() {
   const encryptionKey = encryptionKeyInput.value.trim();
   if (encryptionKey) {
@@ -97,7 +108,7 @@ function copyKeyToClipboard() {
           icon.classList.remove("bi-clipboard-check");
           icon.classList.add("bi-clipboard");
         }, 2000);
-        saveEncryptionKey();
+        saveEncryptionKeyForConversation();
       })
       .catch((err) => {
         console.error("Failed to copy: ", err);
@@ -106,6 +117,13 @@ function copyKeyToClipboard() {
 }
 
 function toggleCopyButton() {
+  // If title doesn't contain (DM) or (Channel), return
+  const pageTitle = tabs[0].title;
+  if (!pageTitle.includes("(DM)") && !pageTitle.includes("(Channel)")) {
+    copyButton.style.display = "none";
+    return;
+  }
+
   if (encryptionKeyInput.value.trim()) {
     copyButton.style.display = "inline-block";
   } else {
@@ -113,32 +131,53 @@ function toggleCopyButton() {
   }
 }
 
-function initializeEventListeners() {
-  const saveButton = document.getElementById("save-key");
-  const generateButton = document.getElementById("generate-key");
-  const copyButton = document.getElementById("copy-key");
+function toggleSlackOption() {
+  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (!tabs || !tabs.length) return;
+    const slackUrlPattern = /^https:\/\/app\.slack\.com\/client\/[^/]+\/[^/]+/;
+    const isSlackConversation = slackUrlPattern.test(tabs[0].url);
 
-  if (saveButton) {
-    saveButton.addEventListener("click", saveEncryptionKey);
-  } else {
-    console.error("Save Key button not found");
+    if (isSlackConversation && pageTitle.includes("(DM)") || pageTitle.includes("(Channel)")) {
+      // Enable elements
+      encryptionKeyInput.disabled = false;
+      saveKeyButton.disabled = false;
+      generateKeyButton.disabled = false;
+      copyButton.disabled = false;
+      encryptionKeyInput.placeholder = "Enter your key";
+    } else {
+      // Disable elements
+      encryptionKeyInput.disabled = true;
+      saveKeyButton.disabled = true;
+      generateKeyButton.disabled = true;
+      copyButton.disabled = true;
+      encryptionKeyInput.placeholder = "Visit a Slack conversation";
+      encryptionKeyInput.value = ""; // Optional: Clear any existing value
+      copyButton.style.display = "none"; // Hide copy button if not applicable
+    }
+  });
+}
+
+function initializeEventListeners() {
+  if (saveKeyButton) {
+    saveKeyButton.addEventListener("click", saveEncryptionKeyForConversation);
   }
 
-  if (generateButton) {
-    generateButton.addEventListener("click", generateKey);
-  } else {
-    console.error("Generate Key button not found");
+  const saveConversationButton = document.getElementById("save-conversation-key");
+  if (saveConversationButton) {
+    saveConversationButton.addEventListener("click", saveEncryptionKeyForConversation);
+  }
+
+  if (generateKeyButton) {
+    generateKeyButton.addEventListener("click", generateKey);
   }
 
   if (copyButton) {
     copyButton.addEventListener("click", copyKeyToClipboard);
-  } else {
-    console.error("Copy Key button not found");
   }
 
   encryptionKeyInput.addEventListener("input", toggleCopyButton);
-
   loadEncryptionKey();
+  toggleSlackOption();
 }
 
 document.addEventListener("DOMContentLoaded", initializeEventListeners);

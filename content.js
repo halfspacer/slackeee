@@ -29,97 +29,21 @@ if (typeof browser === "undefined") {
 }
 
 /**
- * Encrypt a message using AES-GCM.
- * @param {string} message - The message to encrypt.
- * @param {string} key - The encryption key.
- * @returns {Promise<{encryptedMessage: Uint8Array, iv: Uint8Array}>} - The encrypted message and Initialization Vector (IV).
- */
-async function encryptMessage(messageInput, key) {
-  try {
-    const messageWithEmojisEncoded = extractEmojiCodes(messageInput);
-    const iv = window.crypto.getRandomValues(new Uint8Array(12));
-    const encodedMessage = textEncoder.encode(messageWithEmojisEncoded);
-    const hashedKey = await hashKey(key);
-
-    const cryptoKey = await window.crypto.subtle.importKey(
-      "raw",
-      hashedKey,
-      { name: "AES-GCM" },
-      false,
-      ["encrypt"]
-    );
-
-    const encryptedMessage = await window.crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: iv },
-      cryptoKey,
-      encodedMessage
-    );
-
-    return { encryptedMessage: new Uint8Array(encryptedMessage), iv: iv };
-  } catch (error) {}
-}
-
-/**
- * Hash a key using SHA-256.
- * @param {string} key - The key to hash.
- * @returns {Promise<Uint8Array>} - The hashed key.
- */
-async function hashKey(key) {
-  const encodedKey = textEncoder.encode(key);
-  const hash = await crypto.subtle.digest("SHA-256", encodedKey);
-  return new Uint8Array(hash);
-}
-
-/**
- * Replaces emoji images with their corresponding encoded IDs in the input field.
- * @param {HTMLElement} messageInput - The message input field element.
- * @returns {string} - The processed message text with encoded emoji IDs.
- */
-function extractEmojiCodes(messageInput) {
-  const tempDiv = document.createElement("div");
-  tempDiv.innerHTML = messageInput.innerHTML;
-  const emojis = tempDiv.querySelectorAll("img.emoji");
-
-  emojis.forEach((emoji) => {
-    const backgroundImage = emoji.style.backgroundImage;
-    const match = backgroundImage.match(/\/([0-9a-f]{4,})\.png/);
-    const emojiId = match ? match[1] : "unknown";
-    const emojiCode = `:emoji_${emojiId}:`;
-    const textNode = document.createTextNode(emojiCode);
-    emoji.parentNode.replaceChild(textNode, emoji);
-  });
-
-  return tempDiv.textContent || tempDiv.innerText || "";
-}
-
-/**
- * Converts encoded emoji IDs back to emoji images in the decrypted message.
- * @param {string} decryptedText - The decrypted message text with encoded emoji IDs.
- * @returns {string} - The final HTML string with emoji images.
- */
-function convertEmojiCodes(decryptedText) {
-  if (typeof decryptedText !== "string") {
-    return "";
-  }
-
-  const emojiRegex = /:emoji_([0-9a-f]{4,}):/g;
-  return decryptedText.replace(emojiRegex, (match, emojiId) => {
-    return `
-      <span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji" delay="300" data-sk="tooltip_parent">
-        <img src="https://a.slack-edge.com/production-standard-emoji-assets/14.0/google-medium/${emojiId}.png" aria-label="emoji" alt="${match}" data-stringify-type="emoji" data-stringify-emoji="${match}">
-      </span>
-    `;
-  });
-}
-
-/**
  * Initializes the extension by setting up the Send Encrypted button,
  * adding necessary styles, and attaching event listeners for detecting new messages and input changes.
  *
  * @param {string} key - The key used for encryption/decryption of messages.
  */
-function Initialize(key) {
+async function Initialize(key) {
   removeExistingSendButtons();
+
+  const { success, encryptionKey } = await loadEncryptionKey();
+  const didFind = success ? key : null;
+
+  if (!didFind) {
+    return;
+  }
+
   addCSSStyles();
 
   const messageElements = getAllMessageContainers();
@@ -265,7 +189,7 @@ function createSendButton(sendButtonContainer) {
     "c-wysiwyg_container__send_button--with_options"
   );
   encryptedSendButtonContainer.innerHTML = `
-    <button type="button" class="c-wysiwyg_container__button--send-encrypted" aria-label="Send Encrypted Message" title="Send Encrypted Message" data-qa="texty_send_button" data-sk="tooltip_parent" style="margin-right: 8px;">
+    <button type="button" class="c-wysiwyg_container__button--send-encrypted" aria-label="Send Encrypted Message" title="Send Encrypted Message" data-qa="texty_send_button" data-sk="tooltip_parent" style="margin-right: 16px; width: 42px;">
       <svg aria-hidden="true" viewBox="0 0 20 20" class="send-icon">
         <path fill="currentColor" d="M1.5 2.25a.755.755 0 0 1 1-.71l15.596 7.808a.73.73 0 0 1 0 1.305L2.5 18.462l-.076.018a.75.75 0 0 1-.924-.728v-4.54c0-1.21.97-2.229 2.21-2.25l6.54-.17c.27-.01.75-.24.75-.79s-.5-.79-.75-.79l-6.54-.17A2.253 2.253 0 0 1 1.5 6.79z"></path>
       </svg>
@@ -388,8 +312,8 @@ function addSendButtonClickListener(
   key
 ) {
   encryptedSendButton.addEventListener("click", async () => {
-    const messageText = messageInput.textContent;
-    const { success, key } = await getKey();
+    const messageText = messageInput.innerHTML;
+    const { success, key } = await loadEncryptionKey();
     const encryptionKey = success ? key : null;
 
     if (!messageText || !encryptionKey) {
@@ -448,6 +372,48 @@ function addSendButtonClickListener(
 }
 
 /**
+ * Encrypt a message using AES-GCM.
+ * @param {string} message - The message to encrypt.
+ * @param {string} key - The encryption key.
+ * @returns {Promise<{encryptedMessage: Uint8Array, iv: Uint8Array}>} - The encrypted message and Initialization Vector (IV).
+ */
+async function encryptMessage(messageInput, key) {
+  try {
+    const message = messageInput.innerHTML;
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encodedMessage = textEncoder.encode(message);
+    const hashedKey = await hashKey(key);
+
+    const cryptoKey = await window.crypto.subtle.importKey(
+      "raw",
+      hashedKey,
+      { name: "AES-GCM" },
+      false,
+      ["encrypt"]
+    );
+
+    const encryptedMessage = await window.crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv },
+      cryptoKey,
+      encodedMessage
+    );
+
+    return { encryptedMessage: new Uint8Array(encryptedMessage), iv: iv };
+  } catch (error) {}
+}
+
+/**
+ * Hash a key using SHA-256.
+ * @param {string} key - The key to hash.
+ * @returns {Promise<Uint8Array>} - The hashed key.
+ */
+async function hashKey(key) {
+  const encodedKey = textEncoder.encode(key);
+  const hash = await crypto.subtle.digest("SHA-256", encodedKey);
+  return new Uint8Array(hash);
+}
+
+/**
  * Decrypt a message using AES-GCM.
  * @param {Uint8Array} encryptedMessage - The encrypted message.
  * @param {Uint8Array} iv - The Initialization Vector (IV).
@@ -476,8 +442,7 @@ async function decryptMessage(encryptedMessage, iv, key) {
   );
 
   const decodedMessage = textDecoder.decode(decryptedMessage);
-  const messageHtmlWithEmojis = convertEmojiCodes(decodedMessage);
-  return messageHtmlWithEmojis;
+  return decodedMessage;
 }
 
 /**
@@ -494,6 +459,13 @@ async function decryptMessage(encryptedMessage, iv, key) {
 async function decryptAllMessages() {
   // Get all message elements
   if (!messageContainers) {
+    return;
+  }
+
+  const { success, key } = await loadEncryptionKey();
+  const encryptionKey = success ? key : null;
+
+  if (!encryptionKey) {
     return;
   }
 
@@ -530,9 +502,6 @@ async function decryptAllMessages() {
               .split("")
               .map((char) => char.charCodeAt(0))
           );
-
-          const { success, key } = await getKey();
-          const encryptionKey = success ? key : null;
 
           if (!encryptionKey) {
             return;
@@ -572,11 +541,84 @@ async function decryptAllMessages() {
         messageText.innerHTML = msg;
         container.appendChild(messageText);
 
-        // Append the container to the message element
+        msg = msg.replace(/<p>/g, "");
+        msg = msg.replace(/<\/p>/g, "<br>");
+
+        msg = wrapEmojis(msg);
+        msg = wrapCodeBlocks(msg);
+        msg = wrapBlockquotes(msg);
+        msg = wrapInlineCode(msg);
+
+        messageText.innerHTML = msg;
         messageElement.innerHTML = "";
         messageElement.appendChild(container);
       }
     }
+  }
+
+  function wrapEmojis(msg) {
+    const emojiRegex = /<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/g;
+
+    const emojis = msg.match(emojiRegex);
+    if (emojis) {
+      for (const emoji of emojis) {
+        const match = emoji.match(/<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/);
+        if (match) {
+          const [, dataId, dataTitle, dataStringifyText, src, alt, backgroundImageUrl] = match;
+          const ariaLabelMatch = alt.match(/^(.*) emoji$/);
+          const ariaLabel = ariaLabelMatch ? ariaLabelMatch[1] : "";
+          const dataStringifyEmoji = `:${dataId}:`;
+
+          const span = `<span class="c-emoji c-emoji__medium c-emoji--inline" data-qa="emoji" delay="300" data-sk="tooltip_parent">
+      <img src="${backgroundImageUrl}" aria-label="${ariaLabel}" alt="${dataStringifyEmoji}" data-stringify-type="emoji" data-stringify-emoji="${dataStringifyEmoji}">
+    </span>`;
+          msg = msg.replace(emoji, span);
+        }
+      }
+    }
+    return msg;
+}
+
+  function wrapCodeBlocks(msg) {
+    const codeBlockRegex = /<div class="ql-code-block">(.*?)<\/div>/g;
+
+    const codeBlocks = msg.match(codeBlockRegex);
+    if (codeBlocks) {
+      for (const codeBlock of codeBlocks) {
+        const innerContent = codeBlock.match(/<div class="ql-code-block">(.*?)<\/div>/)[1];
+        const wrappedBlock = `<pre class="c-mrkdwn__pre" data-stringify-type="pre"><div class="p-rich_text_block--no-overflow">${innerContent}</div></pre>`;
+        msg = msg.replace(codeBlock, wrappedBlock);
+      }
+    }
+    return msg;
+  }
+
+  function wrapBlockquotes(msg) {
+    const blockquoteRegex = /<blockquote>(.*?)<\/blockquote>/g;
+  
+    const blockquotes = msg.match(blockquoteRegex);
+    if (blockquotes) {
+      for (const blockquote of blockquotes) {
+        const innerContent = blockquote.match(/<blockquote>(.*?)<\/blockquote>/)[1];
+        const wrappedBlockquote = `<blockquote type="cite" class="c-mrkdwn__quote" data-stringify-type="quote">${innerContent}</blockquote>`;
+        msg = msg.replace(blockquote, wrappedBlockquote);
+      }
+    }
+    return msg;
+  }
+
+  function wrapInlineCode(msg) {
+    const inlineCodeRegex = /<code>(.*?)<\/code>/g;
+  
+    const inlineCodes = msg.match(inlineCodeRegex);
+    if (inlineCodes) {
+      for (const inlineCode of inlineCodes) {
+        const innerContent = inlineCode.match(/<code>(.*?)<\/code>/)[1];
+        const wrappedInlineCode = `<code data-stringify-type="code" class="c-mrkdwn__code">${innerContent}</code>`;
+        msg = msg.replace(inlineCode, wrappedInlineCode);
+      }
+    }
+    return msg;
   }
 }
 
@@ -714,22 +756,43 @@ function getAllMessageContainers() {
   return cont;
 }
 
-function setKey(key) {
-  return browser.storage.sync
-    .set({ slackeeeKey: key })
-    .then(() => ({ success: true }))
-    .catch((error) => ({ success: false, error: error.message }));
+function parseConversationId(url) {
+  // https://app.slack.com/client/TEAM_ID/CHANNEL_ID
+  const parts = url.split("/");
+  return parts[parts.length - 1] || null;
 }
 
-function getKey() {
-  return browser.storage.sync
-    .get("slackeeeKey")
-    .then(({ slackeeeKey }) => {
-      if (slackeeeKey) {
-        return { success: true, key: slackeeeKey };
-      } else {
-        return { success: false, error: "No encryption key found." };
+async function loadEncryptionKey() {
+  try {
+    // Send a message to the background script to get the current tab's URL
+    const response = window.location.href;
+
+    // Page title
+    const title = document.title;
+    // If title doesn't contain (DM), it's a channel, return success false
+    if (!title.includes("(DM)")) {
+      return { success: false, key: null };
+    }
+
+    if (response) {
+      const conversationId = parseConversationId(response);
+      if (conversationId) {
+        const key = await getEncryptionKeyForConversationIfAvailable(conversationId);
+        if (key) {
+          return { success: true, key };
+        }
       }
-    })
-    .catch((error) => ({ success: false, error: error.message }));
+    }
+    return { success: false, key: null };
+  } catch (error) {
+    console.error("Error loading encryption key:", error);
+    return { success: false, key: null };
+  }
+}
+
+function getEncryptionKeyForConversationIfAvailable(conversationId) {
+  return browser.storage.sync.get("slackeeeConversationKeys").then((result) => {
+    const conversationKeys = result.slackeeeConversationKeys || {};
+    return conversationKeys[conversationId] || null;
+  });
 }
