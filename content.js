@@ -33,19 +33,32 @@ if (typeof browser === "undefined") {
  * adding necessary styles, and attaching event listeners for detecting new messages and input changes.
  */
 function Initialize(forNode) {
-  console.error("Initializing");
   if (!forNode) {
     forNode = document.body;
   }
   isInitializing = true;
 
-  const existingSendButton = forNode.querySelector(
-    `.${ENCRYPTED_SEND_BUTTON_CLASS}`
-  );
-  if (existingSendButton) {
-    isInitializing = false;
-    decryptAllMessages();
-    return;
+  // Remove existing send buttons if the forNode is the body
+  // We will reinitialize all of them
+  if (forNode === document.body) {
+    const existingSendButtons = document.querySelectorAll(
+      `.${ENCRYPTED_SEND_BUTTON_CLASS}`
+    );
+    for (const existingSendButton of existingSendButtons) {
+      if (existingSendButton) {
+        sendButtonClickedObservers[existingSendButton]?.disconnect();
+        existingSendButton.remove();
+      }
+    }
+  } else {
+    const existingSendButton = forNode.querySelector(
+      `.${ENCRYPTED_SEND_BUTTON_CLASS}`
+    );
+    if (existingSendButton) {
+      isInitializing = false;
+      decryptAllMessages();
+      return;
+    }
   }
 
   const { success, key } = loadEncryptionKey();
@@ -82,9 +95,9 @@ function Initialize(forNode) {
     messageElementCollection.push(messageElementData);
   }
 
-  sendButtons = document.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
-  messageContainers = document.querySelectorAll(MESSAGE_CONTAINER_ID);
-  messageInputs = document.querySelector(INPUT_CONTAINER_ID);
+  sendButtons = forNode.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
+  messageContainers = forNode.querySelectorAll(MESSAGE_CONTAINER_ID);
+  messageInputs = forNode.querySelector(INPUT_CONTAINER_ID);
 
   for (const messageElementData of messageElementCollection) {
     const encryptedSendButton = createSendButton(
@@ -107,7 +120,7 @@ function Initialize(forNode) {
     isInitializing = false;
   }
 
-  //observeChannelChange();
+  observeChannelChange();
   observeThreadOpen();
   observeIncomingMessages();
 
@@ -152,29 +165,24 @@ function observeThreadOpen() {
 
   const callback = function (mutationsList, observer) {
     for (let mutation of mutationsList) {
+      if (!mutation.target) {
+        return;
+      }
+
+      const classNameString = mutation.target.className
+        ? mutation.target.className.toString()
+        : "xxxxxxxxxxx";
       if (
-        (mutation.target &&
-          mutation.target.className &&
-          mutation.target.className === "c-virtual_list__scroll_container") ||
-        mutation.target.className ===
-          "c-virtual_list__scroll_container c-virtual_list__scroll_container--scrollbar" ||
-        mutation.target.className ===
-          "p-file_drag_drop__container p-threads_flexpane"
+        classNameString.includes("p-threads_flexpane") ||
+        classNameString.includes("c-virtual_list") ||
+        classNameString.includes("c-message_list") ||
+        (mutation.addedNodes.length > 0 &&
+          mutation.addedNodes[0].className &&
+          mutation.addedNodes[0].className
+            .toString()
+            .includes("p-view_contents"))
       ) {
-        if (threadContainerObserver) {
-          threadContainerObserver.disconnect();
-        }
-
-        function onThreadDOMChanged() {
-          queryAllComponentsAndInitialize(mutation.target);
-        }
-        threadContainerObserver = new MutationObserver(onThreadDOMChanged);
-        threadContainerObserver.observe(document.body, {
-          childList: true,
-          subtree: true,
-        });
-
-        Initialize(mutation.target);
+        queryAllComponentsAndInitialize(mutation.target);
       }
     }
   };
@@ -750,7 +758,6 @@ function onDOMChanged() {
 function queryAllComponentsAndInitialize(fromNode) {
   if (!fromNode) {
     fromNode = document.body;
-    return;
   }
   const messageElements = getAllMessageContainers(fromNode);
   if (!messageElements || messageElements.length === 0) {
@@ -818,7 +825,7 @@ function getAllMessageContainers(fromNode) {
   if (!fromNode) {
     fromNode = document.body;
   }
-  // Select all elements that have a class starting with 'partial'
+  // Select all elements that have a class starting with
   const cont = fromNode.querySelectorAll(`[class*="${MESSAGE_CONTAINER}"]`);
   return cont;
 }
