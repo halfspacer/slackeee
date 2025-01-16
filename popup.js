@@ -14,7 +14,7 @@ function parseConversationId(url) {
   return parts[parts.length - 1] || null;
 }
 
-function loadEncryptionKey() {
+function loadEncryptionKeyForPopup() {
   browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
     if (tabs && tabs.length) {
       const conversationId = parseConversationId(tabs[0].url);
@@ -26,18 +26,33 @@ function loadEncryptionKey() {
       }
 
       if (conversationId) {
-        getEncryptionKeyForConversationIfAvailable(conversationId).then((key) => {
-          if (key) {
-            encryptionKeyInput.value = key;
-            toggleCopyButton();
+        getEncryptionKeyForConversationIfAvailable(conversationId).then(
+          (key) => {
+            if (key) {
+              encryptionKeyInput.value = key;
+              toggleCopyButton();
 
-            // The name of the person or channel is the first part of the title (before the (DM) part)
-            const titleParts = pageTitle.split(" (DM)");
-            const conversationName = titleParts[0];
-            // Set the encryption-key-label to the conversation name
-            document.getElementById("encryption-key-label").innerHTML = `Secure conversation with <b>${conversationName}</b>`;
+              // The name of the person or channel is the first part of the title (before the (DM) part)
+              let titleParts = pageTitle;
+              isDM = false;
+              if (pageTitle.includes("(DM)")) {
+                titleParts = pageTitle.split("(DM)");
+                isDM = true;
+              } else if (pageTitle.includes("(Channel)")) {
+                titleParts = pageTitle.split("(Channel)");
+              }
+
+              const conversationName = titleParts[0];
+
+              const withOrIn = isDM ? "with" : "in";
+
+              // Set the encryption-key-label to the conversation name
+              document.getElementById(
+                "encryption-key-label"
+              ).innerHTML = `Secure conversation ${withOrIn} <b>${conversationName}</b>`;
+            }
           }
-        });
+        );
       }
     }
   });
@@ -57,9 +72,14 @@ function saveEncryptionKeyForConversation() {
       const conversationKeys = result.slackeeeConversationKeys || {};
       conversationKeys[conversationId] = encryptionKey;
       // Store updated conversation keys
-      browser.storage.sync.set({ slackeeeConversationKeys: conversationKeys }).then(() => {
-        successMessage.style.display = "block";
-      });
+      browser.storage.sync
+        .set({ slackeeeConversationKeys: conversationKeys })
+        .then(() => {
+          successMessage.style.display = "block";
+
+          // Reload the Slack tab
+          browser.tabs.reload(tabs[0].id);
+        });
     });
   });
 }
@@ -116,10 +136,9 @@ function copyKeyToClipboard() {
   }
 }
 
-function toggleCopyButton() {
+function toggleCopyButton(enable) {
   // If title doesn't contain (DM) or (Channel), return
-  const pageTitle = tabs[0].title;
-  if (!pageTitle.includes("(DM)") && !pageTitle.includes("(Channel)")) {
+  if (!enable) {
     copyButton.style.display = "none";
     return;
   }
@@ -131,30 +150,24 @@ function toggleCopyButton() {
   }
 }
 
-function toggleSlackOption() {
-  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
-    if (!tabs || !tabs.length) return;
-    const slackUrlPattern = /^https:\/\/app\.slack\.com\/client\/[^/]+\/[^/]+/;
-    const isSlackConversation = slackUrlPattern.test(tabs[0].url);
-
-    if (isSlackConversation && pageTitle.includes("(DM)") || pageTitle.includes("(Channel)")) {
-      // Enable elements
-      encryptionKeyInput.disabled = false;
-      saveKeyButton.disabled = false;
-      generateKeyButton.disabled = false;
-      copyButton.disabled = false;
-      encryptionKeyInput.placeholder = "Enter your key";
-    } else {
-      // Disable elements
-      encryptionKeyInput.disabled = true;
-      saveKeyButton.disabled = true;
-      generateKeyButton.disabled = true;
-      copyButton.disabled = true;
-      encryptionKeyInput.placeholder = "Visit a Slack conversation";
-      encryptionKeyInput.value = ""; // Optional: Clear any existing value
-      copyButton.style.display = "none"; // Hide copy button if not applicable
-    }
-  });
+function toggleSlackOption(enable) {
+  if (enable) {
+    // Enable elements
+    encryptionKeyInput.disabled = false;
+    saveKeyButton.disabled = false;
+    generateKeyButton.disabled = false;
+    copyButton.disabled = false;
+    encryptionKeyInput.placeholder = "Enter your key";
+  } else {
+    // Disable elements
+    encryptionKeyInput.disabled = true;
+    saveKeyButton.disabled = true;
+    generateKeyButton.disabled = true;
+    copyButton.disabled = true;
+    encryptionKeyInput.placeholder = "Visit a Slack conversation";
+    encryptionKeyInput.value = "";
+    copyButton.style.display = "none";
+  }
 }
 
 function initializeEventListeners() {
@@ -162,9 +175,14 @@ function initializeEventListeners() {
     saveKeyButton.addEventListener("click", saveEncryptionKeyForConversation);
   }
 
-  const saveConversationButton = document.getElementById("save-conversation-key");
+  const saveConversationButton = document.getElementById(
+    "save-conversation-key"
+  );
   if (saveConversationButton) {
-    saveConversationButton.addEventListener("click", saveEncryptionKeyForConversation);
+    saveConversationButton.addEventListener(
+      "click",
+      saveEncryptionKeyForConversation
+    );
   }
 
   if (generateKeyButton) {
@@ -176,8 +194,25 @@ function initializeEventListeners() {
   }
 
   encryptionKeyInput.addEventListener("input", toggleCopyButton);
-  loadEncryptionKey();
-  toggleSlackOption();
+
+  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (!tabs || !tabs.length) return;
+    const slackUrlPattern = /^https:\/\/app\.slack\.com\/client\/[^/]+\/[^/]+/;
+    const isSlackConversation = slackUrlPattern.test(tabs[0].url);
+    const pageTitle = tabs[0].title;
+
+    if (isSlackConversation) {
+      // If title contains (DM) or (Channel), enable Slack options
+      if (pageTitle.includes("(DM)") || pageTitle.includes("(Channel)")) {
+        toggleSlackOption(true);
+        toggleCopyButton(true);
+        loadEncryptionKeyForPopup();
+      }
+    } else {
+      toggleSlackOption(false);
+      toggleCopyButton(false);
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", initializeEventListeners);

@@ -6,7 +6,7 @@ const MESSAGE_ELEMENT_ID = ".p-rich_text_section";
 const SEND_BUTTON_CONTAINER_ID = '[class*="c-wysiwyg_container__send_button"]';
 const ENCRYPTION_DELIMITER = "¤";
 const MESSAGE_CONTAINER_ID = "[data-qa='slack_kit_list']";
-const INPUT_CONTAINER_ID = ".ql-editor";
+const INPUT_CONTAINER_ID = '[class*="ql-editor"]';
 const HEADER_TEXT_CONTAINER_ID = ".p-view_header__text";
 const VIRTUAL_LIST_ITEM_CLASS = "c-virtual_list__item";
 const ENCRYPTED_SEND_BUTTON_CLASS = "encrypted-send-button-container";
@@ -31,22 +31,34 @@ if (typeof browser === "undefined") {
 /**
  * Initializes the extension by setting up the Send Encrypted button,
  * adding necessary styles, and attaching event listeners for detecting new messages and input changes.
- *
- * @param {string} key - The key used for encryption/decryption of messages.
  */
-async function Initialize(key) {
-  removeExistingSendButtons();
+function Initialize(forNode) {
+  console.error("Initializing");
+  if (!forNode) {
+    forNode = document.body;
+  }
+  isInitializing = true;
 
-  const { success, encryptionKey } = await loadEncryptionKey();
-  const didFind = success ? key : null;
+  const existingSendButton = forNode.querySelector(
+    `.${ENCRYPTED_SEND_BUTTON_CLASS}`
+  );
+  if (existingSendButton) {
+    isInitializing = false;
+    decryptAllMessages();
+    return;
+  }
+
+  const { success, key } = loadEncryptionKey();
+  const didFind = success && key;
 
   if (!didFind) {
+    isInitializing = false;
     return;
   }
 
   addCSSStyles();
 
-  const messageElements = getAllMessageContainers();
+  const messageElements = getAllMessageContainers(forNode);
   messageElementCollection = [];
   for (const messageElement of messageElements) {
     // Get the send button container from the message element
@@ -57,6 +69,7 @@ async function Initialize(key) {
     const inputField = messageElement.querySelector(INPUT_CONTAINER_ID);
 
     if (!sendButtonContainer || !inputField) {
+      isInitializing = false;
       return;
     }
 
@@ -78,6 +91,7 @@ async function Initialize(key) {
       messageElementData.sendButtonContainer
     );
     if (!encryptedSendButton) {
+      isInitializing = false;
       return;
     }
 
@@ -89,9 +103,11 @@ async function Initialize(key) {
       messageElementData.sendButtonContainer,
       key
     );
+
+    isInitializing = false;
   }
 
-  observeChannelChange();
+  //observeChannelChange();
   observeThreadOpen();
   observeIncomingMessages();
 
@@ -113,7 +129,7 @@ function observeChannelChange() {
   const callback = function (mutationsList, observer) {
     for (let mutation of mutationsList) {
       if (mutation.type === "childList") {
-        Initialize(KEY);
+        Initialize();
       }
     }
   };
@@ -136,17 +152,29 @@ function observeThreadOpen() {
 
   const callback = function (mutationsList, observer) {
     for (let mutation of mutationsList) {
-      if (mutation.type === "childList") {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1) {
-            const threadNode = node.querySelector(
-              '[class*="p-threads_flexpane"]'
-            );
-            if (threadNode) {
-              Initialize(KEY);
-            }
-          }
+      if (
+        (mutation.target &&
+          mutation.target.className &&
+          mutation.target.className === "c-virtual_list__scroll_container") ||
+        mutation.target.className ===
+          "c-virtual_list__scroll_container c-virtual_list__scroll_container--scrollbar" ||
+        mutation.target.className ===
+          "p-file_drag_drop__container p-threads_flexpane"
+      ) {
+        if (threadContainerObserver) {
+          threadContainerObserver.disconnect();
+        }
+
+        function onThreadDOMChanged() {
+          queryAllComponentsAndInitialize(mutation.target);
+        }
+        threadContainerObserver = new MutationObserver(onThreadDOMChanged);
+        threadContainerObserver.observe(document.body, {
+          childList: true,
+          subtree: true,
         });
+
+        Initialize(mutation.target);
       }
     }
   };
@@ -158,16 +186,18 @@ function observeThreadOpen() {
   threadObserver.observe(targetNode, config);
 }
 
-function removeExistingSendButtons() {
-  const existingSendButtons = document.querySelectorAll(
+let threadContainerObserver;
+
+function removeExistingSendButton(forNode) {
+  if (!forNode) {
+    forNode = document.body;
+  }
+  const existingSendButton = forNode.querySelector(
     `.${ENCRYPTED_SEND_BUTTON_CLASS}`
   );
-  existingSendButtons.forEach((button) => {
-    button.remove();
-  });
-
-  for (const observer of sendButtonClickedObservers) {
-    observer.disconnect();
+  if (existingSendButton) {
+    sendButtonClickedObservers[existingSendButton]?.disconnect();
+    existingSendButton.remove();
   }
 }
 
@@ -304,7 +334,8 @@ function addInputEventListener(messageInput, clonedSendButtonContainer) {
  * Adds a click event listener to the cloned send button container that encrypts the message input
  * before sending it.
  */
-let sendButtonClickedObservers = [];
+// Store the send button click observers in a dictionary with the send button as key, to disconnect them when the message is sent
+let sendButtonClickedObservers = new Map();
 function addSendButtonClickListener(
   encryptedSendButton,
   messageInput,
@@ -355,7 +386,7 @@ function addSendButtonClickListener(
               // Trigger the "keyup" event to update the send button color
               messageInput.dispatchEvent(new KeyboardEvent("keyup"));
             }
-            observer.disconnect();
+            mainObserver.disconnect();
           }
         });
       });
@@ -366,7 +397,11 @@ function addSendButtonClickListener(
         subtree: true,
       });
 
-      sendButtonClickedObservers.push(sendButtonClickedObserver);
+      // Store the observer in a dictionary with the send button as key
+      sendButtonClickedObservers.set(
+        encryptedSendButton,
+        sendButtonClickedObserver
+      );
     } catch (error) {}
   });
 }
@@ -557,14 +592,25 @@ async function decryptAllMessages() {
   }
 
   function wrapEmojis(msg) {
-    const emojiRegex = /<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/g;
+    const emojiRegex =
+      /<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/g;
 
     const emojis = msg.match(emojiRegex);
     if (emojis) {
       for (const emoji of emojis) {
-        const match = emoji.match(/<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/);
+        const match = emoji.match(
+          /<img data-id=":(.*?)" data-title=":(.*?)" data-stringify-text=":(.*?)" class="emoji" src="(.*?)" alt="(.*?)" style="background-image: url\((.*?)\);">/
+        );
         if (match) {
-          const [, dataId, dataTitle, dataStringifyText, src, alt, backgroundImageUrl] = match;
+          const [
+            ,
+            dataId,
+            dataTitle,
+            dataStringifyText,
+            src,
+            alt,
+            backgroundImageUrl,
+          ] = match;
           const ariaLabelMatch = alt.match(/^(.*) emoji$/);
           const ariaLabel = ariaLabelMatch ? ariaLabelMatch[1] : "";
           const dataStringifyEmoji = `:${dataId}:`;
@@ -577,7 +623,7 @@ async function decryptAllMessages() {
       }
     }
     return msg;
-}
+  }
 
   function wrapCodeBlocks(msg) {
     const codeBlockRegex = /<div class="ql-code-block">(.*?)<\/div>/g;
@@ -585,7 +631,9 @@ async function decryptAllMessages() {
     const codeBlocks = msg.match(codeBlockRegex);
     if (codeBlocks) {
       for (const codeBlock of codeBlocks) {
-        const innerContent = codeBlock.match(/<div class="ql-code-block">(.*?)<\/div>/)[1];
+        const innerContent = codeBlock.match(
+          /<div class="ql-code-block">(.*?)<\/div>/
+        )[1];
         const wrappedBlock = `<pre class="c-mrkdwn__pre" data-stringify-type="pre"><div class="p-rich_text_block--no-overflow">${innerContent}</div></pre>`;
         msg = msg.replace(codeBlock, wrappedBlock);
       }
@@ -595,11 +643,13 @@ async function decryptAllMessages() {
 
   function wrapBlockquotes(msg) {
     const blockquoteRegex = /<blockquote>(.*?)<\/blockquote>/g;
-  
+
     const blockquotes = msg.match(blockquoteRegex);
     if (blockquotes) {
       for (const blockquote of blockquotes) {
-        const innerContent = blockquote.match(/<blockquote>(.*?)<\/blockquote>/)[1];
+        const innerContent = blockquote.match(
+          /<blockquote>(.*?)<\/blockquote>/
+        )[1];
         const wrappedBlockquote = `<blockquote type="cite" class="c-mrkdwn__quote" data-stringify-type="quote">${innerContent}</blockquote>`;
         msg = msg.replace(blockquote, wrappedBlockquote);
       }
@@ -609,7 +659,7 @@ async function decryptAllMessages() {
 
   function wrapInlineCode(msg) {
     const inlineCodeRegex = /<code>(.*?)<\/code>/g;
-  
+
     const inlineCodes = msg.match(inlineCodeRegex);
     if (inlineCodes) {
       for (const inlineCode of inlineCodes) {
@@ -694,8 +744,23 @@ function decryptMessagesPeriodically() {
 
 //We wait for all the necessary elements to be available before initializing.
 function onDOMChanged() {
-  const messageElements = getAllMessageContainers();
+  queryAllComponentsAndInitialize(document.body);
+}
+
+function queryAllComponentsAndInitialize(fromNode) {
+  if (!fromNode) {
+    fromNode = document.body;
+    return;
+  }
+  const messageElements = getAllMessageContainers(fromNode);
   if (!messageElements || messageElements.length === 0) {
+    return;
+  }
+
+  if (
+    !document.title.includes("(DM)") &&
+    !document.title.includes("(Channel)")
+  ) {
     return;
   }
 
@@ -722,37 +787,39 @@ function onDOMChanged() {
     messageElementCollection.push(messageElementData);
   }
 
-  sendButtons = document.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
+  sendButtons = fromNode.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
   if (!sendButtons || sendButtons.length === 0) {
     return;
   }
 
-  messageContainers = document.querySelectorAll(MESSAGE_CONTAINER_ID);
+  messageContainers = fromNode.querySelectorAll(MESSAGE_CONTAINER_ID);
   if (!messageContainers || messageContainers.length === 0) {
     return;
   }
 
-  messageInputs = document.querySelector(INPUT_CONTAINER_ID);
+  messageInputs = fromNode.querySelector(INPUT_CONTAINER_ID);
   if (!messageInputs || messageInputs.length === 0) {
     return;
   }
 
-  observer.disconnect();
-  removeExistingSendButtons();
-  Initialize(KEY);
+  mainObserver.disconnect();
+  Initialize();
 }
 
-const observer = new MutationObserver(onDOMChanged);
-observer.observe(document.body, {
+let mainObserver = new MutationObserver(onDOMChanged);
+mainObserver.observe(document.body, {
   childList: true,
   subtree: true,
 });
 
 const MESSAGE_CONTAINER = "p-message_input__input_container_unstyled";
 
-function getAllMessageContainers() {
+function getAllMessageContainers(fromNode) {
+  if (!fromNode) {
+    fromNode = document.body;
+  }
   // Select all elements that have a class starting with 'partial'
-  const cont = document.querySelectorAll(`[class*="${MESSAGE_CONTAINER}"]`);
+  const cont = fromNode.querySelectorAll(`[class*="${MESSAGE_CONTAINER}"]`);
   return cont;
 }
 
@@ -762,30 +829,28 @@ function parseConversationId(url) {
   return parts[parts.length - 1] || null;
 }
 
-async function loadEncryptionKey() {
+function loadEncryptionKey() {
   try {
-    // Send a message to the background script to get the current tab's URL
     const response = window.location.href;
-
-    // Page title
     const title = document.title;
-    // If title doesn't contain (DM), it's a channel, return success false
-    if (!title.includes("(DM)")) {
+
+    if (!title.includes("(DM)") && !title.includes("(Channel)")) {
       return { success: false, key: null };
     }
 
     if (response) {
       const conversationId = parseConversationId(response);
       if (conversationId) {
-        const key = await getEncryptionKeyForConversationIfAvailable(conversationId);
+        const key = getEncryptionKeyForConversationIfAvailable(conversationId);
         if (key) {
           return { success: true, key };
+        } else {
+          return { success: false, key: null };
         }
       }
     }
     return { success: false, key: null };
   } catch (error) {
-    console.error("Error loading encryption key:", error);
     return { success: false, key: null };
   }
 }
