@@ -28,28 +28,32 @@ function loadEncryptionKeyForPopup() {
       if (conversationId) {
         getEncryptionKeyForConversationIfAvailable(conversationId).then(
           (key) => {
+            let titleParts = pageTitle;
+            isDM = false;
+            if (pageTitle.includes("(DM)")) {
+              titleParts = pageTitle.split("(DM)");
+              isDM = true;
+            } else if (pageTitle.includes("(Channel)")) {
+              titleParts = pageTitle.split("(Channel)");
+            }
+
+            const conversationName = titleParts[0];
+            const withOrIn = isDM ? "with " : "in <b>#</b>";
+
             if (key) {
               encryptionKeyInput.value = key;
               toggleCopyButton();
-
-              // The name of the person or channel is the first part of the title (before the (DM) part)
-              let titleParts = pageTitle;
-              isDM = false;
-              if (pageTitle.includes("(DM)")) {
-                titleParts = pageTitle.split("(DM)");
-                isDM = true;
-              } else if (pageTitle.includes("(Channel)")) {
-                titleParts = pageTitle.split("(Channel)");
-              }
-
-              const conversationName = titleParts[0];
-
-              const withOrIn = isDM ? "with" : "in";
 
               // Set the encryption-key-label to the conversation name
               document.getElementById(
                 "encryption-key-label"
               ).innerHTML = `Secure conversation ${withOrIn} <b>${conversationName}</b>`;
+            } else {
+              // Set the encryption-key-label to the conversation name
+              document.getElementById(
+                "encryption-key-label"
+              ).innerHTML = `Start a secure conversation ${withOrIn}<b>${conversationName}</b>`;
+              toggleCopyButton();
             }
           }
         );
