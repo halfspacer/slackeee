@@ -182,7 +182,33 @@ function observeThreadOpen() {
             .toString()
             .includes("p-view_contents"))
       ) {
+        const targetNode = mutation.target;
+        let threadObserverCreationTime = new Date().getTime();
+        const mutationObserver = new MutationObserver((mutations) => {
+          const sendButtonContainer = targetNode.querySelector(
+            SEND_BUTTON_CONTAINER_ID
+          );
+
+          const inputField = targetNode.querySelector(INPUT_CONTAINER_ID);
+
+          if (!sendButtonContainer || !inputField) {
+            if (new Date().getTime() - threadObserverCreationTime > 5000) {
+              mutationObserver.disconnect();
+            }
+            return;
+          }
+
+          queryAllComponentsAndInitialize(mutation.target);
+          mutationObserver.disconnect();
+        });
+
+        mutationObserver.observe(mutation.target, {
+          childList: true,
+          subtree: true,
+        });
+
         queryAllComponentsAndInitialize(mutation.target);
+        decryptAllMessages();
       }
     }
   };
@@ -393,8 +419,10 @@ function addSendButtonClickListener(
 
               // Trigger the "keyup" event to update the send button color
               messageInput.dispatchEvent(new KeyboardEvent("keyup"));
+
+              // Disconnect the observer after the message is sent
+              sendButtonClickedObserver.disconnect();
             }
-            mainObserver.disconnect();
           }
         });
       });
@@ -404,12 +432,6 @@ function addSendButtonClickListener(
         characterData: true,
         subtree: true,
       });
-
-      // Store the observer in a dictionary with the send button as key
-      sendButtonClickedObservers.set(
-        encryptedSendButton,
-        sendButtonClickedObserver
-      );
     } catch (error) {}
   });
 }
@@ -501,9 +523,7 @@ async function decryptMessage(encryptedMessage, iv, key) {
  */
 async function decryptAllMessages() {
   // Get all message elements
-  if (!messageContainers) {
-    return;
-  }
+  messageContainers = document.querySelectorAll(MESSAGE_CONTAINER_ID);
 
   const { success, key } = await loadEncryptionKey();
   const encryptionKey = success ? key : null;
@@ -697,10 +717,10 @@ function observeIncomingMessages() {
     const messageObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-          if (
-            node.classList &&
-            node.classList.contains(VIRTUAL_LIST_ITEM_CLASS)
-          ) {
+          if (!node.className) {
+            return;
+          }
+          if (node.className.toString().includes(VIRTUAL_LIST_ITEM_CLASS)) {
             decryptAllMessages();
           }
         }
