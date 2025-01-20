@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Slackeee",
-  "version": "1.4",
+  "version": "1.14",
   "description": "Slack End-to-End Encryption",
   "permissions": ["storage", "tabs"],
   "action": {
@@ -14,17 +14,8 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.slack.com/*"],
-      "js": ["content.js"]
-    }
-  ],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["styles.css"],
-      "matches": ["<all_urls>"]
+      "js": ["content.js"],
+      "matches": ["*://*.slack.com/*"]
     }
   ],
   "icons": {
@@ -34,7 +25,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "tobias@actuallava.com"
+      "id": "slackeee@actuallava.com"
     }
   }
 }

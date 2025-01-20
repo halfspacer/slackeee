@@ -1,7 +1,7 @@
 // Constants
 const CLONED_WYSIWYG_CONTAINER_ID =
   ".c-wysiwyg_container__button--send-encrypted";
-const KEY = "slackeee-key";
+const KEY = "slackeeeConversationKeys";
 const MESSAGE_ELEMENT_ID = ".p-rich_text_section";
 const SEND_BUTTON_CONTAINER_ID = '[class*="c-wysiwyg_container__send_button"]';
 const ENCRYPTION_DELIMITER = "¤";
@@ -10,8 +10,7 @@ const INPUT_CONTAINER_ID = '[class*="ql-editor"]';
 const HEADER_TEXT_CONTAINER_ID = ".p-view_header__text";
 const VIRTUAL_LIST_ITEM_CLASS = "c-virtual_list__item";
 const ENCRYPTED_SEND_BUTTON_CLASS = "encrypted-send-button-container";
-const CHANNEL_CHANGE_SELECTOR =
-  'div[data-qa="slack_kit_list"].c-virtual_list__scroll_container';
+const CHANNEL_CHANGE_SELECTOR = "div.c-virtual_list__scroll_container";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder("utf-8");
@@ -28,107 +27,159 @@ if (typeof browser === "undefined") {
   var browser = chrome;
 }
 
+const allObservers = [];
+
 /**
  * Initializes the extension by setting up the Send Encrypted button,
  * adding necessary styles, and attaching event listeners for detecting new messages and input changes.
  */
+let isInitializing = false;
+let initQueue = [];
 function Initialize(forNode) {
-  if (!forNode) {
-    forNode = document.body;
-  }
-  isInitializing = true;
-
-  // Remove existing send buttons if the forNode is the body
-  // We will reinitialize all of them
-  if (forNode === document.body) {
-    const existingSendButtons = document.querySelectorAll(
-      `.${ENCRYPTED_SEND_BUTTON_CLASS}`
-    );
-    for (const existingSendButton of existingSendButtons) {
-      if (existingSendButton) {
-        sendButtonClickedObservers[existingSendButton]?.disconnect();
-        existingSendButton.remove();
-      }
+  if (isInitializing) {
+    if (initQueue.length < 3) {
+      initQueue.push(forNode);
     }
-  } else {
-    const existingSendButton = forNode.querySelector(
-      `.${ENCRYPTED_SEND_BUTTON_CLASS}`
-    );
-    if (existingSendButton) {
-      isInitializing = false;
-      decryptAllMessages();
-      return;
-    }
-  }
-
-  const { success, key } = loadEncryptionKey();
-  const didFind = success && key;
-
-  if (!didFind) {
-    isInitializing = false;
     return;
   }
 
-  addCSSStyles();
+  if (!forNode) {
+    forNode = document.body;
+  }
 
-  const messageElements = getAllMessageContainers(forNode);
-  messageElementCollection = [];
-  for (const messageElement of messageElements) {
-    // Get the send button container from the message element
-    const sendButtonContainer = messageElement.querySelector(
-      SEND_BUTTON_CONTAINER_ID
-    );
+  isInitializing = true;
+  console.log("Initializing Slackeee");
 
-    const inputField = messageElement.querySelector(INPUT_CONTAINER_ID);
+  loadEncryptionKey().then((result) => {
+    const { success, key } = result;
+    const didFind = success && key;
 
-    if (!sendButtonContainer || !inputField) {
+    if (!didFind || !key) {
       isInitializing = false;
+
+      console.log(
+        "No key found. Disconnecting all observers and removing " +
+          encryptedSendButtons.length +
+          " send buttons."
+      );
+      for (const sendButton of encryptedSendButtons) {
+        if (sendButton) {
+          sendButtonClickedObservers[sendButton]?.disconnect();
+          sendButton.remove();
+        }
+      }
+
+      disconnectAllObservers();
+      observeThreadOpen();
+      dequeueInit();
       return;
     }
 
-    // Store the message element and send button container together
-    const messageElementData = {
-      inputField,
-      sendButtonContainer,
-    };
-
-    messageElementCollection.push(messageElementData);
-  }
-
-  sendButtons = forNode.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
-  messageContainers = forNode.querySelectorAll(MESSAGE_CONTAINER_ID);
-  messageInputs = forNode.querySelector(INPUT_CONTAINER_ID);
-
-  for (const messageElementData of messageElementCollection) {
-    const encryptedSendButton = createSendButton(
-      messageElementData.sendButtonContainer
-    );
-    if (!encryptedSendButton) {
-      isInitializing = false;
-      return;
+    // Remove existing send buttons if the forNode is the body
+    // We will reinitialize all of them
+    if (forNode === document.body) {
+      const existingSendButtons = document.querySelectorAll(
+        `.${ENCRYPTED_SEND_BUTTON_CLASS}`
+      );
+      for (const existingSendButton of existingSendButtons) {
+        if (existingSendButton) {
+          sendButtonClickedObservers[existingSendButton]?.disconnect();
+          existingSendButton.remove();
+        }
+      }
+    } else {
+      const existingSendButton = forNode.querySelector(
+        `.${ENCRYPTED_SEND_BUTTON_CLASS}`
+      );
+      if (existingSendButton) {
+        isInitializing = false;
+        decryptAllMessages();
+        dequeueInit();
+        return;
+      }
     }
 
-    initializeTooltip(encryptedSendButton);
-    addInputEventListener(messageElementData.inputField, encryptedSendButton);
-    addSendButtonClickListener(
-      encryptedSendButton,
-      messageElementData.inputField,
-      messageElementData.sendButtonContainer,
-      key
-    );
+    disconnectAllObservers();
 
-    isInitializing = false;
-  }
+    addCSSStyles();
 
-  observeChannelChange();
-  observeThreadOpen();
-  observeIncomingMessages();
+    const messageElements = getAllMessageContainers(forNode);
+    messageElementCollection = [];
+    for (const messageElement of messageElements) {
+      // Get the send button container from the message element
+      const sendButtonContainer = messageElement.querySelector(
+        SEND_BUTTON_CONTAINER_ID
+      );
 
-  if (firstRun) {
-    decryptMessagesPeriodically();
-    firstRun = false;
-  } else {
-    decryptAllMessages();
+      const inputField = messageElement.querySelector(INPUT_CONTAINER_ID);
+
+      if (!sendButtonContainer || !inputField) {
+        continue;
+      }
+
+      // Store the message element and send button container together
+      const messageElementData = {
+        inputField,
+        sendButtonContainer,
+      };
+
+      messageElementCollection.push(messageElementData);
+    }
+
+    sendButtons = forNode.querySelectorAll(SEND_BUTTON_CONTAINER_ID);
+    messageContainers = forNode.querySelectorAll(MESSAGE_CONTAINER_ID);
+    messageInputs = forNode.querySelector(INPUT_CONTAINER_ID);
+
+    for (const messageElementData of messageElementCollection) {
+      const encryptedSendButton = createSendButton(
+        messageElementData.sendButtonContainer
+      );
+      if (!encryptedSendButton) {
+        continue;
+      }
+
+      encryptedSendButtons.push(encryptedSendButton);
+      initializeTooltip(encryptedSendButton);
+      addInputEventListener(messageElementData.inputField, encryptedSendButton);
+      addSendButtonClickListener(
+        encryptedSendButton,
+        messageElementData.inputField,
+        messageElementData.sendButtonContainer,
+        key
+      );
+
+      isInitializing = false;
+    }
+
+    observeChannelChange();
+    observeThreadOpen();
+    observeIncomingMessages();
+
+    if (firstRun) {
+      decryptMessagesPeriodically();
+      firstRun = false;
+    } else {
+      decryptAllMessages();
+    }
+
+    function dequeueInit() {
+      isInitializing = false;
+      if (initQueue.length > 0) {
+        const nextNode = initQueue.shift();
+        if (nextNode) {
+          Initialize(nextNode);
+        }
+      }
+    }
+
+    dequeueInit();
+  });
+}
+
+function disconnectAllObservers() {
+  if (allObservers) {
+    allObservers.forEach((o) => o.disconnect());
+    allObservers.length = 0;
   }
 }
 
@@ -142,7 +193,7 @@ function observeChannelChange() {
   const callback = function (mutationsList, observer) {
     for (let mutation of mutationsList) {
       if (mutation.type === "childList") {
-        Initialize();
+        queryAllComponentsAndInitialize(targetNode);
       }
     }
   };
@@ -152,6 +203,7 @@ function observeChannelChange() {
   }
   channelObserver = new MutationObserver(callback);
   channelObserver.observe(targetNode, config);
+  allObservers.push(channelObserver);
 }
 
 /**
@@ -183,6 +235,12 @@ function observeThreadOpen() {
             .includes("p-view_contents"))
       ) {
         const targetNode = mutation.target;
+
+        if (threadObserverMap.has(targetNode.className)) {
+          threadObserverMap.get(targetNode.className).disconnect();
+          threadObserverMap.delete(targetNode.className);
+        }
+
         let threadObserverCreationTime = new Date().getTime();
         const mutationObserver = new MutationObserver((mutations) => {
           const sendButtonContainer = targetNode.querySelector(
@@ -198,16 +256,18 @@ function observeThreadOpen() {
             return;
           }
 
-          queryAllComponentsAndInitialize(mutation.target);
+          queryAllComponentsAndInitialize(targetNode);
           mutationObserver.disconnect();
+          threadObserverMap.delete(targetNode.className);
         });
 
         mutationObserver.observe(mutation.target, {
           childList: true,
           subtree: true,
         });
-
-        queryAllComponentsAndInitialize(mutation.target);
+        threadObserverMap.set(targetNode.className, mutationObserver);
+        allObservers.push(mutationObserver);
+        queryAllComponentsAndInitialize();
         decryptAllMessages();
       }
     }
@@ -218,8 +278,9 @@ function observeThreadOpen() {
   }
   threadObserver = new MutationObserver(callback);
   threadObserver.observe(targetNode, config);
+  allObservers.push(threadObserver);
 }
-
+let threadObserverMap = new Map();
 let threadContainerObserver;
 
 function removeExistingSendButton(forNode) {
@@ -241,10 +302,35 @@ function addCSSStyles() {
     return;
   }
   hasAddedCSS = true;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = browser.runtime.getURL("styles.css");
-  document.head.appendChild(link);
+
+  const style = document.createElement("style");
+  style.innerHTML = `
+  .c-wysiwyg_container__button--send-encrypted {
+    background-color:rgb(175, 76, 76); /* Red background */
+    color: white; /* White text */
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: 4px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted .send-icon {
+    margin-right: 5px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted .lock-icon {
+    width: 16px;
+    height: 16px;
+  }
+
+  .c-wysiwyg_container__button--send-encrypted:hover {
+    background-color:rgb(209, 63, 63); /* Darker red on hover */
+  }
+`;
+  document.head.appendChild(style);
 }
 
 function createSendButton(sendButtonContainer) {
@@ -432,6 +518,9 @@ function addSendButtonClickListener(
         characterData: true,
         subtree: true,
       });
+      allObservers.push(sendButtonClickedObserver);
+      sendButtonClickedObservers[encryptedSendButton] =
+        sendButtonClickedObserver;
     } catch (error) {}
   });
 }
@@ -521,7 +610,24 @@ async function decryptMessage(encryptedMessage, iv, key) {
  * @function decryptAllMessages
  * @returns {Promise<void>} A promise that resolves when all messages have been processed.
  */
+let runAgain = false;
+let decryptMessageRunning = false;
 async function decryptAllMessages() {
+  if (decryptMessageRunning) {
+    runAgain = true;
+    return;
+  }
+
+  function dequeue() {
+    decryptMessageRunning = false;
+    if (runAgain) {
+      runAgain = false;
+      decryptAllMessages();
+    }
+  }
+
+  decryptMessageRunning = true;
+
   // Get all message elements
   messageContainers = document.querySelectorAll(MESSAGE_CONTAINER_ID);
 
@@ -529,6 +635,7 @@ async function decryptAllMessages() {
   const encryptionKey = success ? key : null;
 
   if (!encryptionKey) {
+    dequeue();
     return;
   }
 
@@ -601,7 +708,6 @@ async function decryptAllMessages() {
         // Append the lock icon and the message to the container
         container.appendChild(lockIcon);
         const messageText = document.createElement("span");
-        messageText.innerHTML = msg;
         container.appendChild(messageText);
 
         msg = msg.replace(/<p>/g, "");
@@ -618,6 +724,7 @@ async function decryptAllMessages() {
       }
     }
   }
+  dequeue();
 
   function wrapEmojis(msg) {
     const emojiRegex =
@@ -720,6 +827,7 @@ function observeIncomingMessages() {
           if (!node.className) {
             return;
           }
+
           if (node.className.toString().includes(VIRTUAL_LIST_ITEM_CLASS)) {
             decryptAllMessages();
           }
@@ -731,7 +839,7 @@ function observeIncomingMessages() {
       childList: true,
       subtree: true,
     });
-
+    allObservers.push(messageObserver);
     messageObservers.push(messageObserver);
   }
 
@@ -749,7 +857,7 @@ function observeIncomingMessages() {
         childList: true,
         subtree: true,
       });
-
+      allObservers.push(headerObserver);
       headerObservers.push(headerObserver);
     }
   }
@@ -775,19 +883,33 @@ function onDOMChanged() {
   queryAllComponentsAndInitialize(document.body);
 }
 
-function queryAllComponentsAndInitialize(fromNode) {
+async function queryAllComponentsAndInitialize(fromNode) {
   if (!fromNode) {
     fromNode = document.body;
   }
+
+  const result = await loadEncryptionKey();
+  const { success, key } = result;
+  const didFind = success && key;
+
+  if (!didFind) {
+    disconnectAllObservers();
+    for (const sendButton of encryptedSendButtons) {
+      if (sendButton) {
+        sendButtonClickedObservers[sendButton]?.disconnect();
+        sendButton.remove();
+      }
+    }
+    observeThreadOpen();
+    return;
+  }
+
   const messageElements = getAllMessageContainers(fromNode);
   if (!messageElements || messageElements.length === 0) {
     return;
   }
 
-  if (
-    !document.title.includes("(DM)") &&
-    !document.title.includes("(Channel)")
-  ) {
+  if (!isDirectMessagePage && !isChannelPage) {
     return;
   }
 
@@ -838,7 +960,7 @@ mainObserver.observe(document.body, {
   childList: true,
   subtree: true,
 });
-
+allObservers.push(mainObserver);
 const MESSAGE_CONTAINER = "p-message_input__input_container_unstyled";
 
 function getAllMessageContainers(fromNode) {
@@ -853,22 +975,22 @@ function getAllMessageContainers(fromNode) {
 function parseConversationId(url) {
   // https://app.slack.com/client/TEAM_ID/CHANNEL_ID
   const parts = url.split("/");
-  return parts[parts.length - 1] || null;
+  return parts[parts.length - 1].split("?")[0] || null;
 }
 
-function loadEncryptionKey() {
+async function loadEncryptionKey() {
   try {
     const response = window.location.href;
     const title = document.title;
 
-    if (!title.includes("(DM)") && !title.includes("(Channel)")) {
+    if (!isDirectMessagePage && !isChannelPage) {
       return { success: false, key: null };
     }
 
     if (response) {
       const conversationId = parseConversationId(response);
       if (conversationId) {
-        const key = getEncryptionKeyForConversationIfAvailable(conversationId);
+        const key = await getKeyForConversationIfAvailable(conversationId);
         if (key) {
           return { success: true, key };
         } else {
@@ -882,9 +1004,51 @@ function loadEncryptionKey() {
   }
 }
 
-function getEncryptionKeyForConversationIfAvailable(conversationId) {
-  return browser.storage.sync.get("slackeeeConversationKeys").then((result) => {
-    const conversationKeys = result.slackeeeConversationKeys || {};
-    return conversationKeys[conversationId] || null;
-  });
+let cachedKeys = new Map();
+function getKeyForConversationIfAvailable(conversationId) {
+  if (
+    cachedKeys.has(conversationId) &&
+    cachedKeys.get(conversationId) !== null
+  ) {
+    return cachedKeys.get(conversationId);
+  }
+
+  return browser.storage.sync
+    .get(KEY)
+    .then((result) => {
+      const conversationKeys = result.slackeeeConversationKeys || {};
+      cachedKeys.set(conversationId, conversationKeys[conversationId] || null);
+      return conversationKeys[conversationId] || null;
+    })
+    .catch((error) => {
+      console.error("Error accessing storage: ", error);
+      return null;
+    });
+}
+
+function isChannelPage() {
+  const title = document.title.toLowerCase();
+  return (
+    title.includes("(channel)") ||
+    title.includes("(canal)") ||
+    title.includes("(canale)") ||
+    title.includes("(チャンネル)") ||
+    title.includes("(渠道)") ||
+    title.includes("(频道)") ||
+    title.includes("(채널)")
+  );
+}
+
+function isDirectMessagePage() {
+  const title = document.title.toLowerCase();
+  return (
+    title.includes("(dm)") ||
+    title.includes("(md)") ||
+    title.includes("(direct message)") ||
+    title.includes("(message direct)") ||
+    title.includes("(mensaje directo)") ||
+    title.includes("(mensajes directos)") ||
+    title.includes("(私信)") ||
+    title.includes("((私訊)")
+  );
 }
