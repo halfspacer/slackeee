@@ -5,7 +5,8 @@ Excellent for sharing passwords, keys and other sensitive information quickly.
 
 ## Usage
 
-There is no published version of this extension, so you'll have to load it manually yourself.
+You can run this yourself through Firefox, Chrome or Opera in Development Mode. Alternatively, a published (and more up-to-date) version of this extension exists on the Firefox Add-On Store
+https://addons.mozilla.org/en-US/firefox/addon/slackeee/
 
 ## Screenshots
 
